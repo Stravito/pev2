@@ -1,13 +1,30 @@
 <script lang="ts" setup>
 import * as _ from "lodash"
-import { ref, nextTick, onBeforeMount, onBeforeUnmount } from "vue"
+import {
+  computed,
+  reactive,
+  ref,
+  nextTick,
+  onBeforeMount,
+  onBeforeUnmount,
+} from "vue"
 import { directive as vTippy } from "vue-tippy"
 import { Splitpanes, Pane } from "splitpanes"
 
-import type { IPlan, IPlanContent } from "@/interfaces"
+import type {
+  IBlocksStats,
+  IPlan,
+  IPlanContent,
+  IPlanStats,
+  ITrigger,
+  Node,
+  Settings,
+} from "@/interfaces"
 import PlanNode from "@/components/PlanNode.vue"
+import Stats from "@/components/Stats.vue"
 import { scrollChildIntoParentView } from "@/services/help-service"
 import { PlanService } from "@/services/plan-service"
+import { HelpService } from "@/services/help-service"
 import {
   CenterMode,
   HighlightMode,
@@ -16,7 +33,7 @@ import {
   Orientation,
   ViewMode,
 } from "@/enums"
-import { cost, duration, durationClass, json_, pgsql_, rows } from "@/filters"
+import { duration, durationClass, json_, pgsql_ } from "@/filters"
 
 interface Props {
   planSource: string
@@ -24,14 +41,27 @@ interface Props {
 }
 const props = defineProps<Props>()
 
-const activeTab = ref("")
-const queryText: string = ref(null)
-const validationMessage = ref("")
-const plan = ref<IPlan>(null)
-const planEl = ref(null)
-const planStats = ref({})
-const rootNode = ref<Node>(null)
-const zoomTo = ref<Node>(null)
+const rootEl = ref(null) // The root Element of this instance
+const activeTab = ref<string>("")
+const queryText = ref<string>("")
+const validationMessage = ref<string>("")
+const plan = ref<IPlan>()
+const planEl = ref()
+let planStats = reactive<IPlanStats>({
+  executionTime: NaN,
+  planningTime: NaN,
+  jitTime: NaN,
+  maxRows: NaN,
+  maxDuration: NaN,
+  maxBlocks: {} as IBlocksStats,
+  triggers: [] as ITrigger[],
+  settings: undefined,
+})
+const rootNode = ref<Node>()
+const zoomTo = ref<number>()
+const showSettings = ref<boolean>(false)
+const showTriggers = ref<boolean>(false)
+const selectedNode = ref<number>(NaN)
 
 const viewOptions = ref({
   menuHidden: true,
@@ -46,48 +76,53 @@ const viewOptions = ref({
 
 const planService = new PlanService()
 
+const helpService = new HelpService()
+const getHelpMessage = helpService.getHelpMessage
+
 onBeforeMount(() => {
   const savedOptions = localStorage.getItem("viewOptions")
   if (savedOptions) {
-    _.assignIn(this.viewOptions, JSON.parse(savedOptions))
+    _.assignIn(viewOptions.value, JSON.parse(savedOptions))
   }
   let planJson: IPlanContent
   try {
-    planJson = planService.fromSource(props.planSource)
+    planJson = planService.fromSource(props.planSource) as IPlanContent
     validationMessage.value = ""
     setActiveTab("plan")
   } catch (e) {
     validationMessage.value = "Couldn't parse plan"
-    plan.value = null
+    plan.value = undefined
     return
   }
   rootNode.value = planJson.Plan
   queryText.value = planJson["Query Text"] || props.planQuery
   plan.value = planService.createPlan("", planJson, queryText.value)
   const content = plan.value.content
-  planStats.value = {
+  planStats = {
     executionTime:
-      content["Execution Time"] || content["Total Runtime"] || null,
-    planningTime: content["Planning Time"] || null,
-    maxRows: content.maxRows || null,
-    maxCost: content.maxCost || null,
-    maxDuration: content.maxDuration || null,
-    maxBlocks: content.maxBlocks || null,
+      (content["Execution Time"] as number) ||
+      (content["Total Runtime"] as number) ||
+      NaN,
+    planningTime: (content["Planning Time"] as number) || NaN,
+    maxRows: content.maxRows || NaN,
+    maxCost: content.maxCost || NaN,
+    maxDuration: content.maxDuration || NaN,
+    maxBlocks: content.maxBlocks || {},
     triggers: content.Triggers || [],
     jitTime:
-      (content.JIT && content.JIT.Timing && content.JIT.Timing.Total) || null,
-    settings: content.Settings,
+      (content.JIT && content.JIT.Timing && content.JIT.Timing.Total) || NaN,
+    settings: content.Settings as Settings,
   }
 
   nextTick(() => {
-    let node = 1
+    let nodeId = 1
     let highlightMode = HighlightMode.flash
     if (zoomTo.value) {
-      node = zoomTo.value
+      nodeId = zoomTo.value
       // tslint:disable-next-line:no-bitwise
       highlightMode = HighlightMode.highlight | HighlightMode.showdetails
     }
-    centerNode(node, CenterMode.visible, highlightMode)
+    centerNode(nodeId, CenterMode.visible, highlightMode)
     // build the diagram structure
     // with level and reference to PlanNode components for interaction
     if (!plan.value) {
@@ -112,10 +147,15 @@ function onHashChange(): void {
     if (nodeId !== undefined) {
       // Delayed to make sure the tab has changed before recentering
       setTimeout(() => {
-        this.selectNode(parseInt(nodeId, 0))
+        selectNode(parseInt(nodeId, 0))
       }, 1)
     }
   }
+}
+
+function selectNode(nodeId: number) {
+  selectedNode.value = nodeId
+  centerNode(nodeId, CenterMode.visible, HighlightMode.highlight)
 }
 
 function centerNode(
@@ -123,7 +163,15 @@ function centerNode(
   centerMode: CenterMode,
   highlightMode: HighlightMode
 ): void {
-  const cmp = findPlanNode((o: PlanNode) => o.node.nodeId === nodeId)
+  console.log("centerNode", nodeId, centerMode, highlightMode)
+  /*
+  if (rootEl.value) {
+    highlightEl(
+      rootEl.value.querySelector(".plan-node"),
+      CenterMode.center,
+      HighlightMode.flash
+    )
+  const cmp = findPlanNode((o: typeof PlanNode) => o.node.nodeId === nodeId)
   if (cmp) {
     highlightEl(cmp.$el.querySelector(".plan-node"), centerMode, highlightMode)
     // tslint:disable-next-line:no-bitwise
@@ -131,22 +179,7 @@ function centerNode(
       cmp.setShowDetails(true)
     }
   }
-}
-
-function findPlanNode(predicate: (o: PlanNode) => boolean): PlanNode | null {
-  let found = null
-  /*
-  planEl.value.children.some(function iter(child): boolean | undefined {
-    if (child instanceof PlanNode) {
-      if (predicate(child)) {
-        found = child
-        return true
-      }
-      return child.children.some(iter)
-    }
-  })
   */
-  return found
 }
 
 function highlightEl(
@@ -198,11 +231,28 @@ const planningTimeClass = (percent: number) => {
   }
   return false
 }
+
+const totalTriggerDurationPercent = computed(() => {
+  const executionTime = planStats.executionTime || 0
+  const totalDuration = triggersTotalDuration.value || 0
+  return _.round((totalDuration / executionTime) * 100)
+})
+
+function triggerDurationPercent(trigger: ITrigger) {
+  const executionTime = planStats.executionTime || 0
+  const time = trigger.Time
+  return _.round((time / executionTime) * 100)
+}
+
+const triggersTotalDuration = computed(() => {
+  return _.sumBy(planStats.triggers, (o) => o.Time)
+})
 </script>
 
 <template>
   <div
     class="plan-container d-flex flex-column overflow-hidden flex-grow-1 bg-light"
+    ref="rootEl"
   >
     <div>
       <ul class="nav nav-pills">
@@ -270,8 +320,7 @@ const planningTimeClass = (percent: number) => {
                   N/A
                   <i
                     class="fa fa-info-circle cursor-help"
-                    :content="getHelpMessage('missing execution time')"
-                    v-tippy
+                    v-tippy="getHelpMessage('missing execution time')"
                   ></i>
                 </span>
               </template>
@@ -289,8 +338,7 @@ const planningTimeClass = (percent: number) => {
                   N/A
                   <i
                     class="fa fa-info-circle cursor-help"
-                    :content="getHelpMessage('missing planning time')"
-                    v-tippy
+                    v-tippy="getHelpMessage('missing planning time')"
                   ></i>
                 </span>
               </template>
@@ -300,8 +348,7 @@ const planningTimeClass = (percent: number) => {
                     :class="
                       'mb-0 p-0 px-1 alert ' +
                       planningTimeClass(
-                        (planStats.planningTime /
-                          planStats.executionTime) *
+                        (planStats.planningTime / (planStats.executionTime as number)) *
                           100
                       )
                     "
@@ -312,7 +359,7 @@ const planningTimeClass = (percent: number) => {
             </div>
             <div
               class="d-inline-block border-left px-2"
-              v-if="planStats.jitTime"
+              v-if="planStats.jitTime && planStats.executionTime"
             >
               JIT:
               <span class="stat-value">
@@ -320,9 +367,7 @@ const planningTimeClass = (percent: number) => {
                   :class="
                     'mb-0 p-0 px-1 alert ' +
                     planningTimeClass(
-                      (planStats.jitTime /
-                        planStats.executionTime) *
-                        100
+                      (planStats.jitTime / planStats.executionTime) * 100
                     )
                   "
                   v-html="duration(planStats.jitTime)"
@@ -331,7 +376,7 @@ const planningTimeClass = (percent: number) => {
             </div>
             <div class="d-inline-block border-left px-2 position-relative">
               <span class="stat-label">Triggers: </span>
-              <template v-if="planStats.triggers.length">
+              <template v-if="planStats.triggers && planStats.triggers.length">
                 <span class="stat-value">
                   <span
                     :class="
@@ -370,11 +415,9 @@ const planningTimeClass = (percent: number) => {
                       <span
                         :class="
                           'p-0 px-1 alert ' +
-                          $options.filters.durationClass(
-                            triggerDurationPercent(trigger)
-                          )
+                          durationClass(triggerDurationPercent(trigger))
                         "
-                        v-html="$options.filters.duration(trigger.Time)"
+                        v-html="duration(trigger.Time)"
                       ></span>
                       | {{ triggerDurationPercent(trigger)
                       }}<span class="text-muted">%</span>
@@ -384,7 +427,10 @@ const planningTimeClass = (percent: number) => {
                     {{ trigger.Relation }}
                     <div class="clearfix"></div>
                     <hr
-                      v-if="index != planStats.triggers.length - 1"
+                      v-if="
+                        planStats.triggers &&
+                        index != planStats.triggers.length - 1
+                      "
                       class="my-2"
                     />
                   </div>
@@ -399,7 +445,7 @@ const planningTimeClass = (percent: number) => {
               <span class="stat-label"
                 >Settings:
                 <span class="badge badge-secondary">{{
-                  lodash.keys(planStats.settings).length
+                  _.keys(planStats.settings).length
                 }}</span></span
               >
               <button
@@ -425,10 +471,7 @@ const planningTimeClass = (percent: number) => {
                 </em>
                 <table class="table table-sm table-striped mb-0">
                   <tbody>
-                    <tr
-                      v-for="(value, key) in planStats.settings"
-                      :key="key"
-                    >
+                    <tr v-for="(value, key) in planStats.settings" :key="key">
                       <td>{{ key }}</td>
                       <td>{{ value }}</td>
                     </tr>
@@ -437,7 +480,7 @@ const planningTimeClass = (percent: number) => {
               </div>
             </div>
             <button
-              v-on:click="showHideMenu"
+              v-on:click="viewOptions.menuHidden = !viewOptions.menuHidden"
               :class="[
                 'border-left btn btn-sm p-0 px-2 ml-auto',
                 { 'text-primary': !viewOptions.menuHidden },
@@ -476,19 +519,17 @@ const planningTimeClass = (percent: number) => {
                 >
                   <ul class="main-plan p-2 mb-0">
                     <li>
-                      <!--
                       <plan-node
                         :node="rootNode"
                         :plan="plan"
                         :viewOptions="viewOptions"
-                        :eventBus="eventBus"
+                        v-if="plan && rootNode"
                         ref="root"
                       >
                         <template v-slot:nodeindex="{ node }">
                           <slot name="nodeindex" v-bind:node="node"></slot>
                         </template>
                       </plan-node>
-                      -->
                     </li>
                   </ul>
                   <ul
@@ -545,24 +586,24 @@ const planningTimeClass = (percent: number) => {
                 <div class="btn-group btn-group-sm">
                   <button
                     class="btn btn-outline-secondary"
-                    :class="{ active: viewOptions.viewMode == viewModes.FULL }"
-                    v-on:click="viewOptions.viewMode = viewModes.FULL"
+                    :class="{ active: viewOptions.viewMode == ViewMode.FULL }"
+                    v-on:click="viewOptions.viewMode = ViewMode.FULL"
                   >
                     full
                   </button>
                   <button
                     class="btn btn-outline-secondary"
                     :class="{
-                      active: viewOptions.viewMode == viewModes.COMPACT,
+                      active: viewOptions.viewMode == ViewMode.COMPACT,
                     }"
-                    v-on:click="viewOptions.viewMode = viewModes.COMPACT"
+                    v-on:click="viewOptions.viewMode = ViewMode.COMPACT"
                   >
                     compact
                   </button>
                   <button
                     class="btn btn-outline-secondary"
-                    :class="{ active: viewOptions.viewMode == viewModes.DOT }"
-                    v-on:click="viewOptions.viewMode = viewModes.DOT"
+                    :class="{ active: viewOptions.viewMode == ViewMode.DOT }"
+                    v-on:click="viewOptions.viewMode = ViewMode.DOT"
                   >
                     dot
                   </button>
@@ -575,9 +616,9 @@ const planningTimeClass = (percent: number) => {
                   <button
                     class="btn btn-outline-secondary"
                     :class="{
-                      active: viewOptions.orientation == orientations.TWOD,
+                      active: viewOptions.orientation == Orientation.TWOD,
                     }"
-                    v-on:click="viewOptions.orientation = orientations.TWOD"
+                    v-on:click="viewOptions.orientation = Orientation.TWOD"
                   >
                     <i class="fa fa-sitemap"></i>
                     2D
@@ -585,9 +626,9 @@ const planningTimeClass = (percent: number) => {
                   <button
                     class="btn btn-outline-secondary"
                     :class="{
-                      active: viewOptions.orientation == orientations.CLASSIC,
+                      active: viewOptions.orientation == Orientation.CLASSIC,
                     }"
-                    v-on:click="viewOptions.orientation = orientations.CLASSIC"
+                    v-on:click="viewOptions.orientation = Orientation.CLASSIC"
                   >
                     <i class="fa fa-list"></i>
                     classic
@@ -601,12 +642,9 @@ const planningTimeClass = (percent: number) => {
                   <button
                     class="btn btn-outline-secondary"
                     :class="{
-                      active:
-                        viewOptions.highlightType === highlightTypes.NONE,
+                      active: viewOptions.highlightType === HighlightType.NONE,
                     }"
-                    v-on:click="
-                      viewOptions.highlightType = highlightTypes.NONE
-                    "
+                    v-on:click="viewOptions.highlightType = HighlightType.NONE"
                   >
                     none
                   </button>
@@ -614,10 +652,10 @@ const planningTimeClass = (percent: number) => {
                     class="btn btn-outline-secondary"
                     :class="{
                       active:
-                        viewOptions.highlightType === highlightTypes.DURATION,
+                        viewOptions.highlightType === HighlightType.DURATION,
                     }"
                     v-on:click="
-                      viewOptions.highlightType = highlightTypes.DURATION
+                      viewOptions.highlightType = HighlightType.DURATION
                     "
                     :disabled="!plan.isAnalyze"
                   >
@@ -626,25 +664,21 @@ const planningTimeClass = (percent: number) => {
                   <button
                     class="btn btn-outline-secondary"
                     :class="{
-                      active:
-                        viewOptions.highlightType === highlightTypes.ROWS,
+                      active: viewOptions.highlightType === HighlightType.ROWS,
                     }"
-                    v-on:click="
-                      viewOptions.highlightType = highlightTypes.ROWS
+                    v-on:click="viewOptions.highlightType = HighlightType.ROWS"
+                    :disabled="
+                      !rootNode || rootNode[NodeProp.ACTUAL_ROWS] === undefined
                     "
-                    :disabled="rootNode[nodeProps.ACTUAL_ROWS] === undefined"
                   >
                     rows
                   </button>
                   <button
                     class="btn btn-outline-secondary"
                     :class="{
-                      active:
-                        viewOptions.highlightType === highlightTypes.COST,
+                      active: viewOptions.highlightType === HighlightType.COST,
                     }"
-                    v-on:click="
-                      viewOptions.highlightType = highlightTypes.COST
-                    "
+                    v-on:click="viewOptions.highlightType = HighlightType.COST"
                   >
                     cost
                   </button>
@@ -686,7 +720,7 @@ const planningTimeClass = (percent: number) => {
         class="tab-pane flex-grow-1 overflow-auto"
         :class="{ 'show active': activeTab === 'stats' }"
       >
-        <!--<stats :plan="plan"> </stats>-->
+        <stats :plan="plan" v-if="plan"></stats>
       </div>
     </div>
   </div>
