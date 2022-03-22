@@ -20,6 +20,7 @@ import type {
   Node,
   Settings,
 } from "@/interfaces"
+import Copy from "@/components/Copy.vue"
 import PlanNode from "@/components/PlanNode.vue"
 import Stats from "@/components/Stats.vue"
 import { scrollChildIntoParentView } from "@/services/help-service"
@@ -695,7 +696,7 @@ const triggersTotalDuration = computed(() => {
               class="small p-2 mb-0"
             ><code v-html="json_(planSource)"></code></pre>
           </div>
-          <!--<copy :content="planSource" />-->
+          <copy :content="planSource" />
         </div>
       </div>
       <div
@@ -710,7 +711,7 @@ const triggersTotalDuration = computed(() => {
             ><code v-html="pgsql_(queryText)"></code></pre>
           </div>
         </div>
-        <!--<copy :content="queryText" />-->
+        <copy :content="queryText" />
       </div>
       <div
         class="tab-pane flex-grow-1 overflow-auto"
