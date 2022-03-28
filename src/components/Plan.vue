@@ -723,3 +723,9 @@ const triggersTotalDuration = computed(() => {
     </div>
   </div>
 </template>
+
+<style lang="scss">
+@import "../assets/scss/variables";
+@import "../assets/scss/pev2";
+@import "splitpanes/dist/splitpanes.css";
+</style>
