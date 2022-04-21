@@ -8,6 +8,7 @@ import {
   onBeforeMount,
   onBeforeUnmount,
   onMounted,
+  provide,
 } from "vue"
 import { directive as vTippy } from "vue-tippy"
 import { Splitpanes, Pane } from "splitpanes"
@@ -68,6 +69,7 @@ const zoomTo = ref<number>()
 const showSettings = ref<boolean>(false)
 const showTriggers = ref<boolean>(false)
 const selectedNode = ref<number>(NaN)
+const planNodes: { [key: number]: typeof PlanNode } = {}
 
 const viewOptions = ref({
   menuHidden: true,
@@ -162,6 +164,14 @@ function onHashChange(): void {
   }
 }
 
+// Register a PlanNode component by its id
+function registerNode(node: typeof PlanNode) {
+  planNodes[node.props.node.nodeId] = node
+}
+
+provide("register", registerNode)
+provide("selectedNode", selectedNode)
+
 function selectNode(nodeId: number) {
   selectedNode.value = nodeId
   centerNode(nodeId, CenterMode.visible, HighlightMode.highlight)
@@ -172,23 +182,14 @@ function centerNode(
   centerMode: CenterMode,
   highlightMode: HighlightMode
 ): void {
-  console.log("centerNode", nodeId, centerMode, highlightMode)
-  /*
-  if (rootEl.value) {
-    highlightEl(
-      rootEl.value.querySelector(".plan-node"),
-      CenterMode.center,
-      HighlightMode.flash
-    )
-  const cmp = findPlanNode((o: typeof PlanNode) => o.node.nodeId === nodeId)
+  const cmp = planNodes[nodeId]
   if (cmp) {
-    highlightEl(cmp.$el.querySelector(".plan-node"), centerMode, highlightMode)
+    highlightEl(cmp.refs.el, centerMode, highlightMode)
     // tslint:disable-next-line:no-bitwise
     if (highlightMode & HighlightMode.showdetails) {
       cmp.setShowDetails(true)
     }
   }
-  */
 }
 
 function highlightEl(
@@ -213,10 +214,12 @@ function highlightEl(
             el.classList.remove("flash")
           }, 1000)
         }
+        /*
         // tslint:disable-next-line:no-bitwise
         if (highlightMode & HighlightMode.highlight) {
           el.classList.add("highlight")
         }
+        */
       }
     )
   }
