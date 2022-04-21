@@ -531,9 +531,6 @@ function handleScroll(): void {
                     :plan="plan"
                     class="d-flex flex-column flex-grow-1 overflow-hidden plan-diagram"
                   >
-                    <template v-slot:nodeindex="{ node }">
-                      <slot name="nodeindex" v-bind:node="node"></slot>
-                    </template>
                   </diagram>
                 </pane>
                 <pane
@@ -549,9 +546,6 @@ function handleScroll(): void {
                         v-if="plan && rootNode"
                         ref="root"
                       >
-                        <template v-slot:nodeindex="{ node }">
-                          <slot name="nodeindex" v-bind:node="node"></slot>
-                        </template>
                       </plan-node>
                     </li>
                   </ul>
@@ -566,9 +560,6 @@ function handleScroll(): void {
                         :viewOptions="viewOptions"
                         ref="root"
                       >
-                        <template v-slot:nodeindex="{ node }">
-                          <slot name="nodeindex" v-bind:node="node"></slot>
-                        </template>
                       </plan-node>
                     </li>
                   </ul>
