@@ -711,7 +711,7 @@ function handleScroll(): void {
           <div class="overflow-auto flex-grow-1">
             <pre
               class="small p-2 mb-0"
-            ><code v-html="json_(planSource)"></code></pre>
+            ><code class="hljs" v-html="json_(planSource)"></code></pre>
           </div>
           <copy :content="planSource" />
         </div>
@@ -725,7 +725,7 @@ function handleScroll(): void {
           <div class="overflow-auto flex-grow-1">
             <pre
               class="small p-2 mb-0"
-            ><code v-html="pgsql_(queryText)"></code></pre>
+            ><code class="hljs" v-html="pgsql_(queryText)"></code></pre>
           </div>
         </div>
         <copy :content="queryText" />
@@ -744,4 +744,5 @@ function handleScroll(): void {
 @import "../assets/scss/variables";
 @import "../assets/scss/pev2";
 @import "splitpanes/dist/splitpanes.css";
+@import "highlight.js/scss/stackoverflow-light.scss";
 </style>
