@@ -12,8 +12,10 @@ import {
 } from "vue"
 import { directive as vTippy } from "vue-tippy"
 import { Splitpanes, Pane } from "splitpanes"
+import mitt from "mitt"
 
 import type {
+  Events,
   IBlocksStats,
   IPlan,
   IPlanContent,
@@ -71,6 +73,8 @@ const showTriggers = ref<boolean>(false)
 const selectedNode = ref<number>(NaN)
 const highlightedNode = ref<number>(NaN)
 const planNodes: { [key: number]: typeof PlanNode } = {}
+
+const emitter = mitt<Events>()
 
 const viewOptions = ref({
   menuHidden: true,
@@ -143,6 +147,7 @@ onBeforeMount(() => {
 
 onMounted(() => {
   handleScroll()
+  emitter.on("clickcte", onClickCte)
 })
 
 onBeforeUnmount(() => {
@@ -173,6 +178,7 @@ function registerNode(node: typeof PlanNode) {
 provide("register", registerNode)
 provide("selectedNode", selectedNode)
 provide("highlightedNode", highlightedNode)
+provide("emitter", emitter)
 
 function selectNode(nodeId: number) {
   selectedNode.value = nodeId
@@ -268,6 +274,16 @@ function handleScroll(): void {
   }
   const el: Element = planEl.value.$el as Element
   new Dragscroll(el)
+}
+
+function onClickCte(subplanName: string): void {
+  const cmp = _.find(planNodes, (o) => {
+    return (
+      o.props.node[NodeProp.SUBPLAN_NAME] &&
+      o.props.node[NodeProp.SUBPLAN_NAME] == subplanName
+    )
+  })
+  cmp && highlightEl(cmp.refs.outerEl, CenterMode.visible, HighlightMode.flash)
 }
 </script>
 
