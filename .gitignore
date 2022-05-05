@@ -23,3 +23,5 @@ yarn-error.log*
 
 # Generate files
 pev2.tar.gz
+
+.terraform
